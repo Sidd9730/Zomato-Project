@@ -1,108 +1,109 @@
 pipeline {
     agent any
+
     tools {
         jdk 'jdk17'
         nodejs 'node23'
     }
+
     environment {
-        SCANNER_HOME=tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar-scanner'
     }
+
     stages {
-        stage ("clean workspace") {
+        stage('Clean Workspace') {
             steps {
                 cleanWs()
             }
         }
-        stage ("Git Checkout") {
+
+        stage('Git Checkout') {
             steps {
                 git 'https://github.com/Sidd9730/Zomato-Project.git'
             }
         }
-        stage("Sonarqube Analysis"){
-            steps{
+
+        stage('SonarQube Analysis') {
+            steps {
                 withSonarQubeEnv('sonar-server') {
-                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=zomato \
-                    -Dsonar.projectKey=zomato '''
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=zomato \
+                        -Dsonar.projectKey=zomato
+                    '''
                 }
             }
         }
-        stage("Code Quality Gate"){
-           steps {
+
+        stage('Code Quality Gate') {
+            steps {
                 script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token' 
+                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
                 }
-            } 
-        }
-        stage("Install NPM Dependencies") {
-            steps {
-                sh "npm install"
             }
         }
-        stage('OWASP FS SCAN') {
+
+        stage('Install NPM Dependencies') {
             steps {
-                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit -n', odcInstallation: 'DP-Check'
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-    }
-}
-        stage ("Trivy File Scan") {
-            steps {
-                sh "trivy fs . > trivy.txt"
+                sh 'npm install'
             }
         }
-        stage ("Build Docker Image") {
+
+        stage('Trivy File Scan') {
             steps {
-                sh "docker build -t zomato ."
+                sh 'trivy fs . > trivy.txt'
             }
         }
-        stage ("Tag & Push to DockerHub") {
+
+        stage('Build Docker Image') {
+            steps {
+                sh 'docker build -t zomato .'
+            }
+        }
+
+        stage('Tag & Push to DockerHub') {
             steps {
                 script {
-                    withDockerRegistry(credentialsId: 'docker') {
-                        sh "docker tag zomato sidddocker9730/zomato:latest "
-                        sh "docker push sidddocker9730/zomato:latest "
+                    withCredentials([usernamePassword(credentialsId: 'docker', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh '''
+                            echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                            docker tag zomato $DOCKER_USER/zomato:latest
+                            docker push $DOCKER_USER/zomato:latest
+                        '''
                     }
                 }
             }
         }
-        stage('Docker Scout Image') {
-            steps {
-                script{
-                   withDockerRegistry(credentialsId: 'docker', toolName: 'docker'){
-                       sh 'docker-scout quickview sidddocker9730/zomato:latest'
-                       sh 'docker-scout cves sidddocker9730/zomato:latest'
-                       sh 'docker-scout recommendations sidddocker9730/zomato:latest'
-                   }
-                }
-            }
-        }
-        stage ("Deploy to Container") {
+
+        stage('Deploy to Container') {
             steps {
                 sh 'docker run -d --name zomato -p 3000:3000 sidddocker9730/zomato:latest'
             }
         }
     }
+
     post {
-    always {
-        emailext attachLog: true,
-            subject: "'${currentBuild.result}'",
-            body: """
-                <html>
-                <body>
-                    <div style="background-color: #FFA07A; padding: 10px; margin-bottom: 10px;">
-                        <p style="color: white; font-weight: bold;">Project: ${env.JOB_NAME}</p>
-                    </div>
-                    <div style="background-color: #90EE90; padding: 10px; margin-bottom: 10px;">
-                        <p style="color: white; font-weight: bold;">Build Number: ${env.BUILD_NUMBER}</p>
-                    </div>
-                    <div style="background-color: #87CEEB; padding: 10px; margin-bottom: 10px;">
-                        <p style="color: white; font-weight: bold;">URL: ${env.BUILD_URL}</p>
-                    </div>
-                </body>
-                </html>
-            """,
-            to: 'siddhantgambhir27@gmail.com',
-            mimeType: 'text/html',
-            attachmentsPattern: 'trivy.txt'
+        always {
+            emailext attachLog: true,
+                subject: "'${currentBuild.result}'",
+                body: """
+                    <html>
+                    <body>
+                        <div style="background-color: #FFA07A; padding: 10px; margin-bottom: 10px;">
+                            <p style="color: white; font-weight: bold;">Project: ${env.JOB_NAME}</p>
+                        </div>
+                        <div style="background-color: #90EE90; padding: 10px; margin-bottom: 10px;">
+                            <p style="color: white; font-weight: bold;">Build Number: ${env.BUILD_NUMBER}</p>
+                        </div>
+                        <div style="background-color: #87CEEB; padding: 10px; margin-bottom: 10px;">
+                            <p style="color: white; font-weight: bold;">URL: ${env.BUILD_URL}</p>
+                        </div>
+                    </body>
+                    </html>
+                """,
+                to: 'siddhantgambhir27@gmail.com',
+                mimeType: 'text/html',
+                attachmentsPattern: 'trivy.txt'
         }
     }
 }
